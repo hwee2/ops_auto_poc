@@ -2,6 +2,9 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from app.services.pandas_service import validate_excel_integrity
+import httpx
+from app.config import settings
+from app.services.pandas_service import validate_excel_integrity
 
 router = APIRouter()
 
@@ -16,26 +19,55 @@ class GmailWebhookPayload(BaseModel):
 
 # 엑셀 정합성을 검증 함수
 def process_excel_file(payload: GmailWebhookPayload):
-    try:
-        import httpx
-        from app.config import settings
 
+    try:
+        # 내부 Gmail 서비스 API를 호출하여 메일에 첨부된 엑셀 파일 다운로드 경로 설정
         gmail_api_url = f"{settings.GMAIL_SERVICE_URL}/emails/{payload.email_id}/attachments"
         response = httpx.get(gmail_api_url, timeout=30.0)
 
+        # API 호출 실패 시 다운로드 에러 로그를 남기고 프로세스 즉시 종료
         if response.status_code != 200:
             print(f"[다운로드 실패] Gmail API 호출 실패: {response.status_code}")
             return
 
+        # 다운로드한 파일의 바이너리 바이트 데이터를 변수에 할당
         file_bytes = response.content
+        # 판다스 서비스의 정합성 검증 함수를 실행하여 결과 딕셔너리 수신
         validation_result = validate_excel_integrity(file_bytes)
+
 
         if validation_result.get("status") == "success":
             print(f"[자동화 성공] 정합성 검증 성공: 후속 적재 프로세스를 진행합니다.")
             # TODO: 성공 시 DB 적재 또는 다음 파이프라인 호출
+
+            # DB 적재 서비스에 전송할 메타데이터 페이로드 구성
+            db_payload = {
+                "email_id": payload.email_id,
+                "sender": payload.sender,
+                "total_rows": validation_result.get("total_rows")
+            }
+            # 내부 DB 엔드포인트로 포스트 요청을 보내 최종 데이터 적재 수행
+            db_response = httpx.post(f"{settings.DB_SERVICE_URL}/records", json=db_payload, timeout=10.0)
+            if db_response.status_code != 201:
+                print(f"[DB 적재 실패] 상태 코드: {db_response.status_code}")
+
         else:
             print(f"[자동화 실패] 정합성 검증 실패: {validation_result.get('reason')}")
             # TODO: 실패 시 담당자 알림 및 제휴사 반려 메일 발송
+
+            # 발신자(제휴사)에게 전송할 자동 반려 알림 메일 페이로드 구성
+            alert_payload = {
+                "to_email": payload.sender,
+                "subject": f"[데이터 오류 알림] 엑셀 데이터 정합성 검증 실패 사유 확인 요청",
+                "body_text": f"아래 제휴사로부터 유입된 엑셀 파일의 정합성 검증이 실패했습니다. 데이터 확인 부탁드립니다.\n\n"
+                                f"■ 발신 제휴사 계정: {payload.sender}\n"
+                                f"■ 메일 제목: {payload.subject}\n"
+                                f"■ 검증 실패 사유: {validation_result.get('reason')}\n\n"
+                                f"해당 데이터를 확인해 주시기 바랍니다."
+        }
+            # Gmail 발송 API를 호출하여 제휴사 담당자에게 에러 리포트 메일 즉시 발송
+            httpx.post(f"{settings.GMAIL_SERVICE_URL}/emails/send", json=alert_payload, timeout=10.0)
+
     except Exception as e:
         print(f"[백그라운드 에러] {str(e)}")
 
