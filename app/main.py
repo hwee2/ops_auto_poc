@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.config import settings
 from routers import gmail, allocation
+from upload import excel_upload
 
 
 # fastapi 어플리케이션 인스턴스 생성
@@ -15,12 +16,13 @@ app = FastAPI(
 app.include_router(gmail.router, prefix="/api/v1/gmail", tags=["Gmail 연동"])
 # 배분율 변경 API 호출 경로
 app.include_router(allocation.router, prefix="/api/v1/allocation", tags=["배분율 관리"])
+app.include_router(excel_upload.router, prefix="/api/v1/excel", tags=["Excel 검증"])
 
 # 3. 시스템 상태 체크 엔드포인트
 @app.get("/", tags=["시스템 상태"])
 def read_root():
     return {
         "status": "healthy",
-        "message": "운영 자동화 시스템 백엔드 서버가 정상 구동 중입니다.",
+        "message": "운영 자동화 시스템 서버가 정상 구동 중입니다.",
         "database_connected": settings.DATABASE_URL.startswith("sqlite")
     }
