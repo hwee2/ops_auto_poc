@@ -35,6 +35,7 @@ def read_root():
     }
 
 
+# 제휴사 배분현황 조회
 @app.get("/api/v1/allocation/auto-control")
 async def get_db_status():
     try:
@@ -56,5 +57,5 @@ async def get_db_status():
 @app.put("/api/v1/allocation/auto-control")
 async def auto_control(data: dict):
     print(f"DEBUG: 수신된 데이터 -> {data}") # <--- 추가
-    # 데이터 변경 로직...
+    # 데이터 변경 로직
     return {"status": "success", "received": data}
