@@ -5,7 +5,7 @@ from typing import Optional
 router = APIRouter()
 
 
-# 1. 수신 데이터 규격 정의 (Pydantic 모델)
+# 수신 데이터 모델 정의
 class GmailWebhookPayload(BaseModel):
     email_id: str
     sender: str
@@ -14,7 +14,7 @@ class GmailWebhookPayload(BaseModel):
     body_text: Optional[str] = None
 
 
-# 2. Gmail 수신 엔드포인트 구현 (POST /api/v1/gmail/webhook)
+# Gmail 수신 엔드포인트 구현 (POST /api/v1/gmail/webhook)
 @router.post("/webhook", summary="Gmail 수신 신호 처리 및 분기")
 def receive_gmail_notification(payload: GmailWebhookPayload, background_tasks: BackgroundTasks):
     """
