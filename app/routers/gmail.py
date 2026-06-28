@@ -70,6 +70,28 @@ def process_excel_file(payload: GmailWebhookPayload):
         print(f"[백그라운드 에러] {str(e)}")
 
 
+def process_dify_parsing(payload: GmailWebhookPayload):
+    try:
+        import httpx
+        from app.config import settings
+
+        dify_api_url = f"{settings.DIFY_SERVICE_URL}/chat-messages"
+        headers = {"Authorization": f"Bearer {settings.DIFY_API_KEY}"}
+        dify_payload = {
+            "inputs": {},
+            "query": payload.body_text,
+            "response_mode": "blocking",
+            "user": payload.sender
+        }
+
+        response = httpx.post(dify_api_url, json=dify_payload, headers=headers, timeout=30.0)
+        print(f"[Dify 파싱 완료] 결과 상태 코드: {response.status_code}")
+
+    except Exception as e:
+        print(f"[Dify 백그라운드 에러] {str(e)}")
+
+
+
 # Gmail 수신 엔드포인트 구현 (POST /api/v1/gmail/webhook)
 @router.post("/webhook", summary="Gmail 수신 신호 처리 및 분기")
 def receive_gmail_notification(payload: GmailWebhookPayload, background_tasks: BackgroundTasks):
