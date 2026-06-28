@@ -16,31 +16,29 @@ class GmailWebhookPayload(BaseModel):
     email_id: str
     sender: str
     subject: str
-    has_attachment: bool
+    has_attachment: bool = None
     body_text: Optional[str] = None
 
-# 엑셀 정합성을 검증 함수
+
+# 백그라운드에서 첨부파일 확장자를 판별하고 엑셀일 경우에만 Pandas 검증을 수행하는 함수
 def process_excel_file(payload: GmailWebhookPayload):
-
     try:
-        # 내부 Gmail 서비스 API를 호출하여 메일에 첨부된 엑셀 파일 다운로드 경로 설정
-        gmail_api_url = f"{settings.GMAIL_SERVICE_URL}/emails/{payload.email_id}/attachments"
-        response = httpx.get(gmail_api_url, timeout=30.0)
+        file_name = payload.file_name.lower() if payload.file_name else ""
+        if not (file_name.endswith(".xlsx") or file_name.endswith(".xls")):
+            validation_result = {"status": "fail", "reason": f"엑셀 규격(.xlsx, .xls)이 아닌 올바르지 않은 파일 형식입니다."}
+        else:
+            gmail_api_url = f"{settings.GMAIL_SERVICE_URL}/emails/{payload.email_id}/attachments"
+            response = httpx.get(gmail_api_url, timeout=30.0)
 
-        # API 호출 실패 시 다운로드 에러 로그를 남기고 프로세스 즉시 종료
-        if response.status_code != 200:
-            print(f"[다운로드 실패] Gmail API 호출 실패: {response.status_code}")
-            return
+            if response.status_code != 200:
+                print(f"[다운로드 실패] Gmail API 호출 실패: {response.status_code}")
+                return
 
-        # 다운로드한 파일의 바이너리 바이트 데이터를 변수에 할당
-        file_bytes = response.content
-        # 판다스 서비스의 정합성 검증 함수를 실행하여 결과 딕셔너리 수신
-        validation_result = validate_excel_integrity(file_bytes)
-
+            file_bytes = response.content
+            validation_result = validate_excel_integrity(file_bytes)
 
         if validation_result.get("status") == "success":
-            print(f"[자동화 성공] 정합성 검증 성공: 후속 적재 프로세스를 진행합니다.")
-            # TODO: 성공 시 DB 적재 또는 다음 파이프라인 호출
+            print(f"[자동화 성공] 체결실적 검증 성공: 후속 적재 프로세스를 진행합니다.")
             with SessionLocal() as db:
                 insert_validated_excel_meta(
                     db=db,
@@ -48,28 +46,25 @@ def process_excel_file(payload: GmailWebhookPayload):
                     sender=payload.sender,
                     total_rows=validation_result.get("total_rows")
                 )
-
         else:
-            print(f"[자동화 실패] 정합성 검증 실패: {validation_result.get('reason')}")
-            # TODO: 실패 시 담당자 알림 및 제휴사 반려 메일 발송
+            print(f"[자동화 실패] 정합성 검증 실패. 사유: {validation_result.get('reason')}")
 
-            # 발신자(제휴사)에게 전송할 자동 반려 알림 메일 페이로드 구성
             alert_payload = {
                 "to_email": payload.sender,
                 "subject": f"[데이터 오류 알림] 엑셀 데이터 정합성 검증 실패 사유 확인 요청",
                 "body_text": f"아래 제휴사로부터 유입된 엑셀 파일의 정합성 검증이 실패했습니다. 데이터 확인 부탁드립니다.\n\n"
-                                f"■ 발신 제휴사 계정: {payload.sender}\n"
-                                f"■ 메일 제목: {payload.subject}\n"
-                                f"■ 검증 실패 사유: {validation_result.get('reason')}\n\n"
-                                f"해당 데이터를 확인해 주시기 바랍니다."
-        }
-            # Gmail 발송 API를 호출하여 제휴사 담당자에게 에러 리포트 메일 즉시 발송
+                             f"■ 발신 제휴사 계정: {payload.sender}\n"
+                             f"■ 메일 제목: {payload.subject}\n"
+                             f"■ 검증 실패 사유: {validation_result.get('reason')}\n\n"
+                             f"해당 데이터를 확인해 주시기 바랍니다."
+            }
             httpx.post(f"{settings.GMAIL_SERVICE_URL}/emails/send", json=alert_payload, timeout=10.0)
 
     except Exception as e:
         print(f"[백그라운드 에러] {str(e)}")
 
 
+# 백그라운드에서 Dify AI를 연동해 텍스트 메일을 파싱하고 결과를 처리하는 함수
 def process_dify_parsing(payload: GmailWebhookPayload):
     try:
         import httpx
@@ -85,34 +80,45 @@ def process_dify_parsing(payload: GmailWebhookPayload):
         }
 
         response = httpx.post(dify_api_url, json=dify_payload, headers=headers, timeout=30.0)
-        print(f"[Dify 파싱 완료] 결과 상태 코드: {response.status_code}")
+
+        if response.status_code == 200:
+            dify_result = response.json()
+            parsed_answer = dify_result.get("answer", "")
+            print(f"[Dify 파싱 성공] 추출 데이터: {parsed_answer}")
+        else:
+            print(f"[Dify 파싱 실패] 상태 코드: {response.status_code}")
+
+            alert_payload = {
+                "to_email": settings.ADMIN_EMAIL,
+                "subject": f"[Dify AI 파싱 실패 알림] 제휴사 배분율 변경 텍스트 파싱 오류 발생",
+                "body_text": f"아래 제휴사로부터 유입된 메일의 AI 파싱이 실패했습니다. 확인 부탁드립니다.\n\n"
+                             f"■ 발신 제휴사 계정: {payload.sender}\n"
+                             f"■ 메일 제목: {payload.subject}\n"
+                             f"■ 메일 본문: {payload.body_text}\n\n"
+                             f"Dify 인프라 상태를 점검하거나 내부 시스템에서 수동으로 배분율을 조정해 주시기 바랍니다."
+            }
+            httpx.post(f"{settings.GMAIL_SERVICE_URL}/emails/send", json=alert_payload, timeout=10.0)
 
     except Exception as e:
         print(f"[Dify 백그라운드 에러] {str(e)}")
 
 
-
-# Gmail 수신 엔드포인트 구현 (POST /api/v1/gmail/webhook)
 @router.post("/webhook", summary="Gmail 수신 신호 처리 및 분기")
 def receive_gmail_notification(payload: GmailWebhookPayload, background_tasks: BackgroundTasks):
-    """
-    Gmail API 연동 신호를 수신하여 첨부파일 유무에 따라 후속 비즈니스 로직(Dify 또는 Pandas)으로 분기합니다.
-    """
     try:
         print(f"[수신 통계] 발신자: {payload.sender} | 제목: {payload.subject}")
 
-        # 기획서 3.0 단계: 첨부파일 유무 분기 처리
         if payload.has_attachment:
-            print("-> [YES 경로] 엑셀 첨부파일 확인: Pandas 정합성 검증 단계로 진입합니다.")
-            # TODO: background_tasks.add_task(pandas_service_process, payload)
+            print("-> [YES 경로] 엑셀 첨부파일 확인: 파일 확장자 검증 단계로 진입합니다.")
+            background_tasks.add_task(process_excel_file, payload)
             return {
                 "status": "success",
                 "route": "YES (Excel/Pandas)",
-                "message": "엑셀 정합성 검증 프로세스가 시작되었습니다."
+                "message": "첨부파일 확장자 필터링 및 검증 프로세스가 시작되었습니다."
             }
         else:
             print("-> [NO 경로] 텍스트 메일 확인: AI 파싱 단계로 진입합니다.")
-            # TODO: background_tasks.add_task(dify_service_process, payload)
+            background_tasks.add_task(process_dify_parsing, payload)
             return {
                 "status": "success",
                 "route": "NO (Text/Dify)",

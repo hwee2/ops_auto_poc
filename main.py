@@ -1,12 +1,13 @@
 from fastapi import FastAPI
 from app.config import settings
-from routers import gmail, allocation
-from upload import excel_upload
+from app.routers import gmail, allocation
+from app.upload import excel_upload
 from app.database import engine
 from app.models import partner_model
 
-
+# 데이터베이스 테이블 자동 생성
 partner_model.Base.metadata.create_all(bind=engine)
+
 # fastapi 어플리케이션 인스턴스 생성
 app = FastAPI(
     title="제휴사 운영 자동화 시스템 PoC",

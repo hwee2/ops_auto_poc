@@ -1,47 +1,33 @@
 from datetime import datetime
 import pandas as pd
-from io import BytesIO
-from fastapi import HTTPException
+import io
+
 
 
 def validate_excel_integrity(file_bytes: bytes) -> dict:
     try:
-        df = pd.read_excel(BytesIO(file_bytes))
+        # 바이너리 바이트 데이터를 판다스가 읽을 수 있도록 메모리 버퍼 스트림으로 변환
+        excel_stream = io.BytesIO(file_bytes)
+        df = pd.read_excel(excel_stream)
 
-        required_columns = ["partner_name", "contract_date", "contract_count"]
-        missing_columns = [col for col in required_columns if col not in df.columns]
-        if missing_columns:
-            print(f"[검증 실패] 필수 컬럼 누락: {missing_columns}")
-            return {"status": "fail", "reason": f"필수 컬럼 누락: {missing_columns}"}
+        # 기획서상 필수적으로 존재해야 하는 데이터 컬럼 정의
+        required_columns = ["제휴사ID", "배분율", "적용시작일"]
 
-        # 판다스가 날짜 형식을 자동으로 파싱하고 MM-DD는 현재 연도와 알아서 결합함
-        df["contract_date"] = pd.to_datetime(df["contract_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        # 파일 내에 필수 컬럼이 하나라도 누락되었는지 검사
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            return {"status": "fail", "reason": f"필수 컬럼 누락: {', '.join(missing_cols)}"}
 
-        if df["contract_date"].isnull().any():
-            print(f"[검증 실패] 유효하지 않은 날짜 형식 포함")
-            return {
-                "status": "fail",
-                "reason": "contract_date 필드에 처리할 수 없는 날짜 형식이 포함되어 있습니다."
-            }
+        # 배분율 컬럼에 빈 값(Null)이나 결측치가 존재하는지 검사
+        if df["배분율"].isnull().any():
+            return {"status": "fail", "reason": "배분율 컬럼에 누락된 값이 존재합니다."}
 
-        # contract_count 검증
-        df["contract_count"] = pd.to_numeric(df["contract_count"], errors="coerce")
-
-        if (df["contract_count"] < 0).any() or df["contract_count"].isnull().any():
-            print(f"[검증 실패] contract_count 규칙 위반 발견")
-            return {
-                "status": "fail",
-                "reason": "contract_count 필드에 음수 또는 허용되지 않는 문자(공백 포함)가 존재합니다."
-            }
-
-        total_rows = len(df)
-        print(f"[검증 성공] 총 {total_rows}건 검증 통과")
+        # 모든 검증 조건을 통과한 경우 데이터 총 행수와 함께 성공 반환
         return {
             "status": "success",
-            "reason": "모든 규격 데이터 정합성 검증 및 정규화 통과",
-            "total_rows": total_rows
+            "total_rows": len(df)
         }
 
     except Exception as e:
-        print(f"[Pandas 서비스 내부 오류] {str(e)}")
-        raise HTTPException(status_code=500, detail=f"엑셀 정합성 검증 중 오류 발생: {str(e)}")
+        # 엑셀 파일 손상이나 확장자 불일치 등 파싱 자체 실패 시 예외 처리
+        return {"status": "fail", "reason": f"엑셀 파일 해석 불가 및 손상: {str(e)}"}
