@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from app.services.pandas_service import validate_excel_integrity
 
 router = APIRouter()
 
@@ -16,7 +17,19 @@ class GmailWebhookPayload(BaseModel):
 # 엑셀 정합성을 검증 함수
 def process_excel_file(payload: GmailWebhookPayload):
     try:
-        pass
+        import httpx
+        from app.config import settings
+
+        gmail_api_url = f"{settings.GMAIL_SERVICE_URL}/emails/{payload.email_id}/attachments"
+        response = httpx.get(gmail_api_url, timeout=30.0)
+
+        if response.status_code != 200:
+            print(f"[다운로드 실패] Gmail API 호출 실패: {response.status_code}")
+            return
+
+        file_bytes = response.content
+        validation_result = validate_excel_integrity(file_bytes)
+        print(f"[검증 완료 결과] {validation_result}")
     except Exception as e:
         print(f"[백그라운드 에러] {str(e)}")
 
