@@ -5,6 +5,8 @@ from app.services.pandas_service import validate_excel_integrity
 import httpx
 from app.config import settings
 from app.services.pandas_service import validate_excel_integrity
+from app.database import SessionLocal
+from app.services.db_service import insert_validated_excel_meta
 
 router = APIRouter()
 
@@ -39,17 +41,13 @@ def process_excel_file(payload: GmailWebhookPayload):
         if validation_result.get("status") == "success":
             print(f"[자동화 성공] 정합성 검증 성공: 후속 적재 프로세스를 진행합니다.")
             # TODO: 성공 시 DB 적재 또는 다음 파이프라인 호출
-
-            # DB 적재 서비스에 전송할 메타데이터 페이로드 구성
-            db_payload = {
-                "email_id": payload.email_id,
-                "sender": payload.sender,
-                "total_rows": validation_result.get("total_rows")
-            }
-            # 내부 DB 엔드포인트로 포스트 요청을 보내 최종 데이터 적재 수행
-            db_response = httpx.post(f"{settings.DB_SERVICE_URL}/records", json=db_payload, timeout=10.0)
-            if db_response.status_code != 201:
-                print(f"[DB 적재 실패] 상태 코드: {db_response.status_code}")
+            with SessionLocal() as db:
+                insert_validated_excel_meta(
+                    db=db,
+                    email_id=payload.email_id,
+                    sender=payload.sender,
+                    total_rows=validation_result.get("total_rows")
+                )
 
         else:
             print(f"[자동화 실패] 정합성 검증 실패: {validation_result.get('reason')}")
