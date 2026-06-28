@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.ext.declarative import declarative_base
-from datetime import datetime
+from datetime import datetime, timezone
 
 Base = declarative_base()
 
@@ -21,7 +21,7 @@ class PartnerExcelRecord(Base):
     email_id = Column(String, unique=True, index=True, nullable=False)
     sender_email = Column(String, nullable=False)
     row_count = Column(Integer, nullable=False)
-    processed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    processed_at = Column(DateTime, default=datetime.now(timezone.utc), nullable=False)
 
     # # 배분율 관련 컬럼
     # allocation_ratio = Column(Integer, nullable=False)
