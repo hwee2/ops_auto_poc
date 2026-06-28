@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from datetime import datetime, timezone
 
@@ -12,6 +12,9 @@ class PartnerMaster(Base):
     partner_name = Column(String, unique=True, index=True, nullable=False)
     original_ratio = Column(Integer, nullable=False) # 원복 기준값
     current_ratio = Column(Integer, nullable=False) # 실시간 제어값
+    is_reserved = Column(Boolean, default=False)
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
 
 
 class PartnerExcelRecord(Base):
