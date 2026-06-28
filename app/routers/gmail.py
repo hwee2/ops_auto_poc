@@ -13,6 +13,13 @@ class GmailWebhookPayload(BaseModel):
     has_attachment: bool
     body_text: Optional[str] = None
 
+# 엑셀 정합성을 검증 함수
+def process_excel_file(payload: GmailWebhookPayload):
+    try:
+        pass
+    except Exception as e:
+        print(f"[백그라운드 에러] {str(e)}")
+
 
 # Gmail 수신 엔드포인트 구현 (POST /api/v1/gmail/webhook)
 @router.post("/webhook", summary="Gmail 수신 신호 처리 및 분기")
