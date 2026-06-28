@@ -29,7 +29,13 @@ def process_excel_file(payload: GmailWebhookPayload):
 
         file_bytes = response.content
         validation_result = validate_excel_integrity(file_bytes)
-        print(f"[검증 완료 결과] {validation_result}")
+
+        if validation_result.get("status") == "success":
+            print(f"[자동화 성공] 정합성 검증 성공: 후속 적재 프로세스를 진행합니다.")
+            # TODO: 성공 시 DB 적재 또는 다음 파이프라인 호출
+        else:
+            print(f"[자동화 실패] 정합성 검증 실패: {validation_result.get('reason')}")
+            # TODO: 실패 시 담당자 알림 및 제휴사 반려 메일 발송
     except Exception as e:
         print(f"[백그라운드 에러] {str(e)}")
 
